@@ -102,6 +102,10 @@ init_radio (ModemOfonoDevice *self)
 {
     g_autoptr (GError) error = NULL;
 
+    /* Interfaces changes often; the proxies follow the interface by themselves */
+    if (self->priv->modem_ofono_device_radio_proxy != NULL)
+        return;
+
     self->priv->modem_ofono_device_radio_proxy = g_dbus_proxy_new_for_bus_sync (
         G_BUS_TYPE_SYSTEM,
         0,
@@ -148,6 +152,9 @@ static void
 init_voice_call_manager_interface (ModemOfonoDevice *self)
 {
     g_autoptr (GError) error = NULL;
+
+    if (self->priv->modem_ofono_voice_call_manager_proxy != NULL)
+        return;
 
     self->priv->modem_ofono_voice_call_manager_proxy =
         g_dbus_proxy_new_for_bus_sync (
@@ -421,10 +428,20 @@ modem_ofono_device_dispose (GObject *modem_ofono_device)
 {
     ModemOfonoDevice *self = MODEM_OFONO_DEVICE (modem_ofono_device);
 
-    g_clear_object (&self->priv->modem_ofono_device_modem_proxy);
-    g_clear_object (&self->priv->modem_ofono_device_radio_proxy);
-    g_clear_object (&self->priv->modem_ofono_device_network_proxy);
-    g_clear_object (&self->priv->modem_ofono_voice_call_manager_proxy);
+    GDBusProxy **proxies[] = {
+        &self->priv->modem_ofono_device_modem_proxy,
+        &self->priv->modem_ofono_device_radio_proxy,
+        &self->priv->modem_ofono_device_network_proxy,
+        &self->priv->modem_ofono_voice_call_manager_proxy,
+    };
+
+    /* A proxy may outlive us (a pending call holds a ref): its signals
+     * must not reach a freed device */
+    for (guint i = 0; i < G_N_ELEMENTS (proxies); i++) {
+        if (*proxies[i] != NULL)
+            g_signal_handlers_disconnect_by_data (*proxies[i], self);
+        g_clear_object (proxies[i]);
+    }
 
     G_OBJECT_CLASS (modem_ofono_device_parent_class)->dispose (modem_ofono_device);
 }
