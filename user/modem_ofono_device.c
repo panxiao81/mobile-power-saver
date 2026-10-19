@@ -49,6 +49,8 @@ struct _ModemOfonoDevicePrivate {
 
     gboolean powersaving_enabled;
     gboolean powersaving_applied;
+    /* TechnologyPreference to restore when powersave is lifted */
+    char *saved_technology;
 
     guint timeout_id;
 };
@@ -211,8 +213,13 @@ apply_powersave (ModemOfonoDevice *self,
     const char *property_name = NULL;
     g_autoptr (GVariant) property_value = NULL;
     g_autofree char *technology = NULL;
+    g_autofree char *current = NULL;
 
     if (self->priv->modem_ofono_device_radio_proxy == NULL)
+        return;
+
+    /* Nothing of ours to undo: leave the user's preference alone */
+    if (!powersave && !self->priv->powersaving_applied)
         return;
 
     self->priv->powersaving_applied = powersave;
@@ -234,6 +241,8 @@ apply_powersave (ModemOfonoDevice *self,
 
     g_variant_get (value, "(a{sv})", &iter);
     while (g_variant_iter_loop (iter, "{&sv}", &property_name, &property_value)) {
+        if (g_strcmp0 (property_name, "TechnologyPreference") == 0)
+            current = g_variant_dup_string (property_value, NULL);
         if (g_strcmp0 (property_name, "AvailableTechnologies") == 0) {
             g_autoptr (GVariantIter) tech_iter;
             const char *tech_value;
@@ -249,7 +258,16 @@ apply_powersave (ModemOfonoDevice *self,
         }
     }
 
-    set_technology_preference (self, technology);
+    if (powersave) {
+        if (self->priv->saved_technology == NULL)
+            self->priv->saved_technology = g_steal_pointer (&current);
+    } else if (self->priv->saved_technology != NULL) {
+        g_free (technology);
+        technology = g_steal_pointer (&self->priv->saved_technology);
+    }
+
+    if (technology != NULL)
+        set_technology_preference (self, technology);
 }
 
 static void
@@ -417,6 +435,7 @@ modem_ofono_device_finalize (GObject *modem_ofono_device)
     ModemOfonoDevice *self = MODEM_OFONO_DEVICE (modem_ofono_device);
 
     g_free (self->priv->device_path);
+    g_free (self->priv->saved_technology);
     g_clear_handle_id (&self->priv->timeout_id, g_source_remove);
 
     G_OBJECT_CLASS (modem_ofono_device_parent_class)->finalize (modem_ofono_device);
