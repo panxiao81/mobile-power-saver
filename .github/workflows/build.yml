@@ -27,7 +27,7 @@ jobs:
             QUILT_PATCHES=debian/patches quilt push -a || true
             rm -rf .pc
           fi
-          RELENG_HOST_ARCH="arm64" releng-build-package
+          RELENG_FULL_BUILD=yes RELENG_HOST_ARCH="arm64" releng-build-package
           mv -v ../*.deb ../*.buildinfo ../*.changes /results
           '
     - uses: actions/upload-artifact@v4
