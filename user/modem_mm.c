@@ -15,6 +15,13 @@
 
 #define CONNECT_TIMEOUT 60 * 1000 * 1000
 
+/* Modes in force before powersave, kept on each MMModem */
+#define SAVED_MODES_KEY "mps-saved-modes"
+typedef struct {
+    MMModemMode allowed;
+    MMModemMode preferred;
+} SavedModes;
+
 struct _ModemMMPrivate {
     GDBusConnection *connection;
     MMManager *manager;
@@ -23,6 +30,7 @@ struct _ModemMMPrivate {
     MMModemState state;
 
     gint64 connected_timestamp;
+    gboolean powersaving_applied;
 };
 
 G_DEFINE_TYPE_WITH_CODE (
@@ -39,6 +47,11 @@ modem_mm_set_powersave (Modem    *self,
     ModemMM *this = MODEM_MM (self);
     MMModem *modem;
 
+    /* Nothing of ours to undo: leave the user's modes alone */
+    if (!powersave && !this->priv->powersaving_applied)
+        return;
+    this->priv->powersaving_applied = powersave;
+
     GFOREACH (this->priv->modems, modem) {
         MMModemModeCombination *modes = NULL;
         guint n_modes;
@@ -53,6 +66,13 @@ modem_mm_set_powersave (Modem    *self,
 
             /* On powersave, switch to first mode after 4G */
             if (powersave) {
+                SavedModes saved;
+
+                if (g_object_get_data (G_OBJECT (modem), SAVED_MODES_KEY) == NULL &&
+                    mm_modem_get_current_modes (modem, &saved.allowed, &saved.preferred))
+                    g_object_set_data_full (G_OBJECT (modem), SAVED_MODES_KEY,
+                                            g_memdup2 (&saved, sizeof saved), g_free);
+
                  while (i >= 0 &&
                         (allowed & MM_MODEM_MODE_4G) == MM_MODEM_MODE_4G) {
                     allowed = modes[i].allowed;
@@ -60,13 +80,21 @@ modem_mm_set_powersave (Modem    *self,
                     i -= 1;
                 }
             } else {
-                while (i >= 0) {
-                    if (modes[i].preferred > preferred) {
-                        allowed = modes[i].allowed;
-                        preferred = modes[i].preferred;
+                SavedModes *saved = g_object_get_data (G_OBJECT (modem), SAVED_MODES_KEY);
+
+                if (saved != NULL) {
+                    allowed = saved->allowed;
+                    preferred = saved->preferred;
+                } else {
+                    while (i >= 0) {
+                        if (modes[i].preferred > preferred) {
+                            allowed = modes[i].allowed;
+                            preferred = modes[i].preferred;
+                        }
+                        i -= 1;
                     }
-                    i -= 1;
                 }
+                g_object_set_data (G_OBJECT (modem), SAVED_MODES_KEY, NULL);
             }
 
             g_message ("Modem mode: %u %u", allowed, preferred);
