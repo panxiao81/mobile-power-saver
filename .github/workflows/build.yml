@@ -1,0 +1,41 @@
+name: Build packages
+
+on:
+  push:
+    branches: [ "droidian" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # releng-build-package derives the version from git history
+    - name: Build packages in the Droidian build container
+      run: |
+        docker run -v ${{ github.workspace }}:/sources -v /tmp/results:/results \
+          quay.io/droidian/build-essential:next-arm64 /bin/bash -c '
+          set -e
+          cd /sources
+          git config --global --add safe.directory /sources
+          if [ -f debian/patches/series ]; then
+            apt-get install -y quilt
+            QUILT_PATCHES=debian/patches quilt push -a || true
+            rm -rf .pc
+          fi
+          RELENG_HOST_ARCH="arm64" releng-build-package
+          mv -v ../*.deb ../*.buildinfo ../*.changes /results
+          '
+    - uses: actions/upload-artifact@v4
+      with:
+        path: /tmp/results
+    - name: Publish release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        version=$(dpkg-deb -f $(ls /tmp/results/*.deb | head -1) Version | sed 's/+/-/g;s/~/-/g')
+        gh release create "$version" /tmp/results/* --title "$version" --target "$GITHUB_SHA" --notes "Built from $GITHUB_SHA"
