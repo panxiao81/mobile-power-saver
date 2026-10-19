@@ -10,6 +10,7 @@
 #include "network_manager.h"
 #include "modem_ofono.h"
 #include "modem_ofono_device.h"
+#include "settings.h"
 #include "../common/utils.h"
 
 #define OFONO_DBUS_NAME                     "org.ofono"
@@ -73,6 +74,11 @@ on_modem_ofono_device_ready (ModemOfonoDevice *device,
     gboolean powersave = (
         modem_get_powersave (MODEM (self)) & MODEM_POWERSAVE_ENABLED
     ) == MODEM_POWERSAVE_ENABLED;
+
+    /* Like the other apply paths, honour radio-power-saving: the flags
+     * (e.g. WiFi) are tracked even when radio power saving is off */
+    if (!settings_get_radio_powersaving (settings_get_default ()))
+        return;
 
     modem_ofono_device_apply_powersave (device, powersave);
 }
